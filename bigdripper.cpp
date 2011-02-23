@@ -1,6 +1,7 @@
 #include <math.h>
 #include <util/delay.h>
 #include <WProgram.h>
+#include <EEPROM.h>
 
 #define UVLED1_PIN          6 
 #define UVLED2_PIN          13 
@@ -17,11 +18,7 @@
 #define DEVICE_COUNT        9
 #define MODE_COUNT          5
 
-#define SHIFT_OFFSET_TYPE   0
-#define ON_OFFSET_TYPE      1
-#define OFF_OFFSET_TYPE     2
-
-#define PROMPT_ENABLE       0
+#define PROMPT_ENABLE       1
 
 // Helper macros for frobbing bits
 #define bitset(var,bitno) ((var) |= (1 << (bitno)))
@@ -30,6 +27,24 @@
 
 const int _pump_map[] = {PUMP1_PIN, PUMP2_PIN, PUMP3_PIN, PUMP4_PIN,
                             PUMP5_PIN, PUMP6_PIN, PUMP7_PIN, PUMP8_PIN};
+
+/******************************************************************************
+ ** Helper Functions
+ ******************************************************************************/
+
+int read_int(int &addr)
+{
+    unsigned char a = EEPROM.read(addr++);
+    unsigned char b = EEPROM.read(addr++);
+    return static_cast<int>(a | (b << 8));
+}
+
+void write_int(int &addr, int value)
+{
+    EEPROM.write(addr++, (value & 0xFF));
+    EEPROM.write(addr++, ((value >> 8) & 0xFF));
+}
+
 
 /******************************************************************************
  ** Pin
@@ -213,6 +228,7 @@ public:
 
     void set_default_timings()
     {
+        /*
         led_set_step(130, 26);
         _pumps[0].set_step(108, 48);
         _pumps[1].set_step(106, 50);
@@ -223,6 +239,13 @@ public:
         _pumps[6].set_step(104, 52);
         _pumps[7].set_step(98, 58);
         _pumps[8].set_step(134, 22);
+        */
+        int mem_idx = 0;
+        led_set_step(read_int(mem_idx), read_int(mem_idx));
+        for(int pump_idx = 0; pump_idx < PUMP_COUNT; ++pump_idx)
+        {
+            _pumps[pump_idx].set_step(read_int(mem_idx), read_int(mem_idx));
+        }
     }
 
     void pump_set_step(unsigned int _on, unsigned int _off)
@@ -612,6 +635,7 @@ private:
  ******************************************************************************/
 
 PinSet          pins;
+bool            run_modes;
 MarqueeMode     _marquee_mode_instance;
 RandomWalkMode  _random_walk_mode_instance;
 CarpetMode      _carpet_mode_instance;
@@ -764,6 +788,26 @@ void Prompt(void)
       case 'z':
         v = 0;
         break;
+      case 'M':
+        run_modes = true;
+        break;
+      case 'm':
+        run_modes = false;
+        break;
+      case 'W':
+        int mem_idx = 0;
+        write_int(mem_idx, pins[-1].get_step_on());
+        write_int(mem_idx, pins[-1].get_step_off());
+        for(int pump_idx = 0; pump_idx < PUMP_COUNT; ++pump_idx)
+        {
+            write_int(mem_idx, pins[pump_idx].get_step_on());
+            write_int(mem_idx, pins[pump_idx].get_step_off());
+        }
+        break;
+      case 'D':
+        pins.led_set_step(130, 26);
+        pins.pump_set_step(130, 26);
+        break;
       case 'x':
         pins[device].disable();
         break;
@@ -829,16 +873,22 @@ void Prompt(void)
 
 void loop()
 {
-#if PROMPT_ENABLE
-    Prompt();
-#else 
-    ModeRunner _mode_runner;
-    _mode_runner.next_mode();
-    for (;;)
+    run_modes = true;
+    for(;;)
     {
-        _mode_runner.step();
-    }
+        ModeRunner _mode_runner;
+        _mode_runner.next_mode();
+        while(run_modes)
+        {
+#if PROMPT_ENABLE
+            Prompt();
 #endif // PROMPT_ENABLE
+            _mode_runner.step();
+        }
+#if PROMPT_ENABLE
+        Prompt();
+#endif // PROMPT_ENABLE
+    }
 }
 
 

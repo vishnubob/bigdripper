@@ -48,6 +48,7 @@
 PORT = /dev/tty.usbserial*
 TARGET = bigdripper
 ARDUINO = $(HOME)/local/arduino/hardware/arduino/cores/arduino
+LIBRARIES = $(HOME)/local/arduino/libraries/EEPROM
 AVRLIBC = /usr/lib/avr/include/avr
 SRC = $(ARDUINO)/pins_arduino.c $(ARDUINO)/wiring.c $(ARDUINO)/WInterrupts.c
 CXXSRC = $(ARDUINO)/WMath.cpp $(ARDUINO)/main.cpp $(TARGET).cpp 
@@ -72,8 +73,8 @@ CDEFS = -DF_CPU=$(F_CPU)
 CXXDEFS = -DF_CPU=$(F_CPU)
 
 # Place -I options here
-CINCS = -I$(ARDUINO) -I$(AVRLIBC)
-CXXINCS = -I$(ARDUINO) -I$(AVRLIBC)
+CINCS = -I$(ARDUINO) -I$(AVRLIBC) -I$(LIBRARIES)
+CXXINCS = -I$(ARDUINO) -I$(AVRLIBC) -I$(LIBRARIES)
 
 # Compiler flag to set the C Standard level.
 # c89   - "ANSI" C
