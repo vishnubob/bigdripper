@@ -807,7 +807,15 @@ void Prompt(void)
         break;
       case 'D':
         pins.led_set_step(130, 26);
-        pins.pump_set_step(130, 26);
+        pins[0].set_step(109, 47);
+        pins[1].set_step(114, 42);
+        pins[2].set_step(96, 60);
+        pins[3].set_step(105, 51);
+        pins[4].set_step(101, 55);
+        pins[5].set_step(101, 55);
+        pins[6].set_step(110, 46);
+        pins[7].set_step(94, 62);
+        pins[8].set_step(134, 22);
         break;
       case 'x':
         pins[device].disable();
