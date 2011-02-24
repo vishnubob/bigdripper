@@ -806,6 +806,8 @@ void Prompt(void)
         }
         break;
       case 'D':
+        pins.reset();
+        /*
         pins.led_set_step(130, 26);
         pins[0].set_step(109, 47);
         pins[1].set_step(114, 42);
@@ -816,6 +818,7 @@ void Prompt(void)
         pins[6].set_step(110, 46);
         pins[7].set_step(94, 62);
         pins[8].set_step(134, 22);
+        */
         break;
       case 'x':
         pins[device].disable();
