@@ -18,6 +18,9 @@
 #define DEVICE_COUNT        9
 #define MODE_COUNT          5
 
+#define TIMING_ADDR         0
+#define SEED_ADDR           (TIMING_ADDR + (sizeof(int) * DEVICE_COUNT))
+
 #define PROMPT_ENABLE       1
 
 // Helper macros for frobbing bits
@@ -43,6 +46,43 @@ void write_int(int &addr, int value)
 {
     EEPROM.write(addr++, (value & 0xFF));
     EEPROM.write(addr++, ((value >> 8) & 0xFF));
+}
+
+long read_long(int &addr)
+{
+    unsigned char a = EEPROM.read(addr++);
+    unsigned char b = EEPROM.read(addr++);
+    unsigned char c = EEPROM.read(addr++);
+    unsigned char d = EEPROM.read(addr++);
+    return static_cast<long>(a | 
+            (static_cast<long>(b) << 8) | 
+            (static_cast<long>(c) << 16) | 
+            (static_cast<long>(d) << 24));
+}
+
+void write_long(int &addr, long value)
+{
+    EEPROM.write(addr++, (value & 0xFF));
+    EEPROM.write(addr++, ((value >> 8) & 0xFF));
+    EEPROM.write(addr++, ((value >> 16) & 0xFF));
+    EEPROM.write(addr++, ((value >> 24) & 0xFF));
+}
+
+unsigned long sync_random_seed()
+{
+    unsigned long seed;
+    int addr;
+    addr = SEED_ADDR;
+    seed = static_cast<unsigned long>(read_long(addr));
+    for(int pinidx = 0; pinidx < 6; ++pinidx)
+    {
+        seed <<= 3;
+        seed ^= analogRead(pinidx);
+    }
+    addr = SEED_ADDR;
+    write_long(addr, static_cast<long>(seed));
+    randomSeed(seed);
+    return seed;
 }
 
 
@@ -726,22 +766,14 @@ void setup()
     sei();
 
     // random seed
-    long seed;
-    seed = analogRead(4);
-    for(int idx = 0; idx < 10; ++idx)
-    {
-        seed += analogRead(4);
-        seed ^= analogRead(4);
-    }
-    seed = abs(seed);
-    randomSeed(seed);
+    unsigned long seed = sync_random_seed();
     Serial.print("seed(");
     Serial.print(seed, DEC);
     Serial.print(")... ");
 
     // priming
     Serial.print("priming ...");
-    pins.prime(50);
+    pins.prime(5000);
     Serial.println("]");
     Serial.flush();
 
