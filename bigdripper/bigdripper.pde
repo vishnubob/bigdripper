@@ -16,7 +16,7 @@
 
 #define PUMP_COUNT          8
 #define DEVICE_COUNT        9
-#define MODE_COUNT          5
+#define MODE_COUNT          6
 
 #define TIMING_ADDR         0
 #define SEED_ADDR           (TIMING_ADDR + (sizeof(int) * DEVICE_COUNT))
@@ -456,7 +456,8 @@ public:
     virtual void init_core()
     {
         _pinset->pumps_disable();
-        _ttl_step = 8 * random(3, 10);
+        //_ttl_step = 8 * random(3, 10);
+        _ttl_time = 1000 * random(30, 61);
         _interval_step = 100 * random(30, 40);
         _pump_idx = rand() % PUMP_COUNT;
 
@@ -466,6 +467,13 @@ public:
         _up_offset = 0;
         _direction = 1;
         _offset_val = random(1, 3);
+        _ramp = 0;
+        // do we speed up during our mode?
+        if(rand() % 2)
+        {
+            _ramp = (Ramp*)malloc(sizeof(Ramp));
+            _ramp->init(_interval_step, 50, _ttl_time);
+        }
     }
 
     void step_core()
@@ -500,7 +508,10 @@ public:
         (*_pinset)[_up_cursor].set_offset(_up_offset);
         (*_pinset)[_down_cursor].enable();
         (*_pinset)[_up_cursor].enable();
+        if (_ramp) _interval_step = _ramp->step();
     }
+
+    void cleanup() { if (_ramp) free(_ramp); }
 
 private:
     unsigned char   _pump_idx;
@@ -510,8 +521,60 @@ private:
     char            _up_offset;
     char            _offset_val;
     bool            _direction;
+    Ramp            *_ramp;
 };
 
+/******************************************************************************
+ ** FaceMeltMode
+ ******************************************************************************/
+
+class FaceMeltMode: public Mode
+{
+public:
+    virtual void init_core()
+    {
+        _pinset->pumps_enable();
+        _ttl_time = 1000 * random(30, 61);
+        _interval_step = 1;
+        /* ramps */
+        unsigned long ramp_ttl = 1000 * random(1, 5);
+        int rval = -15;
+        for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
+        {
+            _ramps[ridx] = (Ramp*)malloc(sizeof(Ramp));
+            _ramps[ridx]->init(rval, -rval, ramp_ttl);
+            if (ridx != 3) rval += 5;
+        }
+    }
+
+    void step_core()
+    {
+        bool timeout = true;
+        for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
+        {
+            (*_pinset)[ridx].set_offset(_ramps[ridx]->step());
+            timeout &= _ramps[ridx]->timeout(); 
+        }
+        if (timeout)
+        {
+            for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
+            {
+                _ramps[ridx]->flip();
+            }
+        }
+    }
+
+    void cleanup()
+    {
+        for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
+        {
+            free(_ramps[ridx]);
+        }
+    }
+
+private:
+    Ramp*               _ramps[PUMP_COUNT];
+};
 
 
 /******************************************************************************
@@ -554,12 +617,11 @@ private:
     bool            _direction;
 };
 
-
 /******************************************************************************
- ** CarpetMode
+ ** BounceMode
  ******************************************************************************/
 
-class CarpetMode: public Mode
+class BounceMode: public Mode
 {
 public:
     virtual void init_core()
@@ -678,9 +740,10 @@ PinSet          pins;
 bool            run_modes;
 MarqueeMode     _marquee_mode_instance;
 RandomWalkMode  _random_walk_mode_instance;
-CarpetMode      _carpet_mode_instance;
+BounceMode      _bounce_mode_instance;
 MarqueeRampMode _marquee_ramp_mode_instance;
 PassMode        _pass_mode_instance;
+FaceMeltMode    _face_melt_mode_instance;
 
 /******************************************************************************
  ** ModeRunner
@@ -693,9 +756,10 @@ public:
     {
         _modes[0] = &_marquee_mode_instance;
         _modes[1] = &_random_walk_mode_instance;
-        _modes[2] = &_carpet_mode_instance;
+        _modes[2] = &_bounce_mode_instance;
         _modes[3] = &_marquee_ramp_mode_instance;
         _modes[4] = &_pass_mode_instance;
+        _modes[5] = &_face_melt_mode_instance;
     }
 
     void next_mode()
