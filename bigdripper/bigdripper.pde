@@ -19,7 +19,7 @@
 #define MODE_COUNT          6
 
 #define TIMING_ADDR         0
-#define SEED_ADDR           (TIMING_ADDR + (sizeof(int) * DEVICE_COUNT))
+#define SEED_ADDR           (TIMING_ADDR + (2 * sizeof(int) * DEVICE_COUNT))
 
 #define PROMPT_ENABLE       1
 
@@ -541,8 +541,18 @@ public:
         int rval = -15;
         for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
         {
-            _ramps[ridx] = (Ramp*)malloc(sizeof(Ramp));
-            _ramps[ridx]->init(rval, -rval, ramp_ttl);
+            if(rval != 0)
+            {
+                _ramps[ridx] = (Ramp*)malloc(sizeof(Ramp));
+                // malloc might of failed
+                if(_ramps[ridx])
+                {
+                    _ramps[ridx]->init(rval, -rval, ramp_ttl);
+                }
+            } else
+            {
+                _ramps[ridx] = 0;
+            }
             if (ridx != 3) rval += 5;
         }
     }
@@ -552,14 +562,17 @@ public:
         bool timeout = true;
         for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
         {
-            (*_pinset)[ridx].set_offset(_ramps[ridx]->step());
-            timeout &= _ramps[ridx]->timeout(); 
+            if(_ramps[ridx] != 0) 
+            {
+                (*_pinset)[ridx].set_offset(_ramps[ridx]->step());
+                timeout &= _ramps[ridx]->timeout(); 
+            }
         }
         if (timeout)
         {
             for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
             {
-                _ramps[ridx]->flip();
+                if(_ramps[ridx] != 0) _ramps[ridx]->flip();
             }
         }
     }
@@ -568,7 +581,7 @@ public:
     {
         for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
         {
-            free(_ramps[ridx]);
+            if(_ramps[ridx] != 0) free(_ramps[ridx]);
         }
     }
 
