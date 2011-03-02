@@ -1,5 +1,6 @@
 #include <math.h>
 #include <util/delay.h>
+ #include <avr/wdt.h> 
 #include <WProgram.h>
 #include <EEPROM.h>
 
@@ -32,7 +33,7 @@ const int _pump_map[] = {PUMP1_PIN, PUMP2_PIN, PUMP3_PIN, PUMP4_PIN,
                             PUMP5_PIN, PUMP6_PIN, PUMP7_PIN, PUMP8_PIN};
 
 /******************************************************************************
- ** Helper Functions
+ ** EEPROM reads / writer helper functions
  ******************************************************************************/
 
 int read_int(int &addr)
@@ -268,18 +269,6 @@ public:
 
     void set_default_timings()
     {
-        /*
-        led_set_step(130, 26);
-        _pumps[0].set_step(108, 48);
-        _pumps[1].set_step(106, 50);
-        _pumps[2].set_step(106, 50);
-        _pumps[3].set_step(108, 48);
-        _pumps[4].set_step(106, 50);
-        _pumps[5].set_step(101, 55);
-        _pumps[6].set_step(104, 52);
-        _pumps[7].set_step(98, 58);
-        _pumps[8].set_step(134, 22);
-        */
         int mem_idx = 0;
         led_set_step(read_int(mem_idx), read_int(mem_idx));
         for(int pump_idx = 0; pump_idx < PUMP_COUNT; ++pump_idx)
@@ -389,6 +378,12 @@ private:
     bool _enable;
 };
 
+/******************************************************************************
+ ** Globals
+ ******************************************************************************/
+
+PinSet          pins;
+Ramp            ramps[DEVICE_COUNT];
 
 /******************************************************************************
  ** Mode
@@ -397,11 +392,10 @@ private:
 class Mode
 {
 public:
-    void init(PinSet *pinset)
+    void init()
     {
-        _pinset = pinset;
         _start_ts = millis();
-        _pinset->reset();
+        pins.reset();
         _last_step = 0;
         _ttl_time = 0;
         _ttl_step = 0;
@@ -434,7 +428,6 @@ public:
 
     virtual void init_core() = 0;
     virtual void step_core() = 0;
-    virtual void cleanup() {};
 
 protected:
     unsigned long   _ttl_time;
@@ -443,7 +436,6 @@ protected:
     unsigned long   _interval_step;
     unsigned long   _last_step;
     unsigned long   _start_ts;
-    PinSet          *_pinset;
 };
 
 /******************************************************************************
@@ -455,7 +447,7 @@ class PassMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_disable();
+        pins.pumps_disable();
         //_ttl_step = 8 * random(3, 10);
         _ttl_time = 1000 * random(30, 61);
         _interval_step = 100 * random(30, 40);
@@ -471,15 +463,15 @@ public:
         // do we speed up during our mode?
         if(rand() % 2)
         {
-            _ramp = (Ramp*)malloc(sizeof(Ramp));
+            _ramp = &(ramps[0]);
             _ramp->init(_interval_step, 50, _ttl_time);
         }
     }
 
     void step_core()
     {
-        (*_pinset)[_down_cursor].disable();
-        (*_pinset)[_up_cursor].disable();
+        pins[_down_cursor].disable();
+        pins[_up_cursor].disable();
 
         _up_cursor += _direction ? 1 : -1;
         _down_cursor += (!_direction) ? 1 : -1;
@@ -504,14 +496,15 @@ public:
         _up_offset += _offset_val;
         _down_offset -= _offset_val;
 
-        (*_pinset)[_down_cursor].set_offset(_down_offset);
-        (*_pinset)[_up_cursor].set_offset(_up_offset);
-        (*_pinset)[_down_cursor].enable();
-        (*_pinset)[_up_cursor].enable();
-        if (_ramp) _interval_step = _ramp->step();
+        pins[_down_cursor].set_offset(_down_offset);
+        pins[_up_cursor].set_offset(_up_offset);
+        pins[_down_cursor].enable();
+        pins[_up_cursor].enable();
+        if (_ramp)
+        {
+            _interval_step = _ramp->step();
+        }
     }
-
-    void cleanup() { if (_ramp) free(_ramp); }
 
 private:
     unsigned char   _pump_idx;
@@ -533,7 +526,7 @@ class FaceMeltMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_enable();
+        pins.pumps_enable();
         _ttl_time = 1000 * random(30, 61);
         _interval_step = 1;
         /* ramps */
@@ -543,12 +536,8 @@ public:
         {
             if(rval != 0)
             {
-                _ramps[ridx] = (Ramp*)malloc(sizeof(Ramp));
-                // malloc might of failed
-                if(_ramps[ridx])
-                {
-                    _ramps[ridx]->init(rval, -rval, ramp_ttl);
-                }
+                _ramps[ridx] = &(ramps[ridx]);
+                _ramps[ridx]->init(rval, -rval, ramp_ttl);
             } else
             {
                 _ramps[ridx] = 0;
@@ -564,7 +553,7 @@ public:
         {
             if(_ramps[ridx] != 0) 
             {
-                (*_pinset)[ridx].set_offset(_ramps[ridx]->step());
+                pins[ridx].set_offset(_ramps[ridx]->step());
                 timeout &= _ramps[ridx]->timeout(); 
             }
         }
@@ -572,16 +561,11 @@ public:
         {
             for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
             {
-                if(_ramps[ridx] != 0) _ramps[ridx]->flip();
+                if(_ramps[ridx] != 0)
+                {
+                    _ramps[ridx]->flip();
+                }
             }
-        }
-    }
-
-    void cleanup()
-    {
-        for(int ridx = 0; ridx < PUMP_COUNT; ++ridx)
-        {
-            if(_ramps[ridx] != 0) free(_ramps[ridx]);
         }
     }
 
@@ -599,12 +583,12 @@ class MarqueeRampMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_enable();
+        pins.pumps_enable();
         _ttl_time = 1000 * random(30, 61);
         _interval_step = 100 * random(5, 15);
         _pump_idx = rand() % PUMP_COUNT;
         _direction = true;
-        (*_pinset)[_pump_idx].set_offset(get_offset());
+        pins[_pump_idx].set_offset(get_offset());
     }
 
     int get_offset()
@@ -620,9 +604,9 @@ public:
         {
             _direction = !_direction;
         }
-        (*_pinset)[_pump_idx].reset_offset();
+        pins[_pump_idx].reset_offset();
         _pump_idx += _direction ? 1 : -1;
-        (*_pinset)[_pump_idx].set_offset(get_offset());
+        pins[_pump_idx].set_offset(get_offset());
     }
 
 private:
@@ -639,22 +623,20 @@ class BounceMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_enable();
+        pins.pumps_enable();
         _ttl_time = 1000 * random(30, 61);
         int bnb = random(10, 30);
         unsigned long ramp_ttl = 1000 * random(1, 5);
-        _ramp = (Ramp*)malloc(sizeof(Ramp));
+        _ramp = &(ramps[0]);
         _ramp->init(-bnb, bnb, ramp_ttl);
     }
 
     void step_core()
     {
         int val = _ramp->step();
-        (*_pinset)[-1].set_offset(val);
+        pins[-1].set_offset(val);
         if (_ramp->timeout()) _ramp->flip();
     }
-
-    void cleanup() { free(_ramp); }
 
 private:
     Ramp            *_ramp;
@@ -669,13 +651,13 @@ class MarqueeMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_disable();
+        pins.pumps_disable();
         _ttl_time = 1000 * random(30, 61);
         _interval_step = 100 * random(5, 15);
         _pump_idx = rand() % PUMP_COUNT;
         _direction = true;
-        (*_pinset)[_pump_idx].enable();
-        _ramp = (Ramp*)malloc(sizeof(Ramp));
+        pins[_pump_idx].enable();
+        _ramp = &(ramps[0]);
         _ramp->init(_interval_step, 50, _ttl_time);
         int loff = random(5, 16);
         _led_offsets[0] = -loff;
@@ -687,20 +669,18 @@ public:
 
     void step_core()
     {
-        (*_pinset)[_pump_idx].disable();
+        pins[_pump_idx].disable();
         if( ((_pump_idx == 0) && !_direction) ||
             ((_pump_idx == (PUMP_COUNT - 1)) && _direction) )
         {
             _direction = !_direction;
         }
         _pump_idx += _direction ? 1 : -1;
-        (*_pinset)[_pump_idx].enable();
+        pins[_pump_idx].enable();
         _led_offset_idx += 1;
-        (*_pinset)[-1].set_offset(_led_offsets[(_led_offset_idx % 4)]);
+        pins[-1].set_offset(_led_offsets[(_led_offset_idx % 4)]);
         _interval_step = _ramp->step();
     }
-
-    void cleanup() { free(_ramp); }
 
 private:
     unsigned char   _pump_idx;
@@ -719,11 +699,11 @@ class RandomWalkMode: public Mode
 public:
     virtual void init_core()
     {
-        _pinset->pumps_disable();
+        pins.pumps_disable();
         _ttl_time = 1000 * random(30, 61);
         _interval_step = 100 * random(5, 15);
         _pump_idx = rand() % PUMP_COUNT;
-        (*_pinset)[_pump_idx].enable();
+        pins[_pump_idx].enable();
     }
 
     void step_core()
@@ -733,10 +713,10 @@ public:
         {
             next_pump = (_pump_idx + 1) % PUMP_COUNT;
         }
-        (*_pinset)[_pump_idx].disable();
+        pins[_pump_idx].disable();
         char offset = random(-5, 6);
-        (*_pinset)[-1].set_offset(offset);
-        (*_pinset)[next_pump].enable();
+        pins[-1].set_offset(offset);
+        pins[next_pump].enable();
         _pump_idx = next_pump;
     }
 
@@ -746,10 +726,9 @@ private:
 
 
 /******************************************************************************
- ** Globals
+ ** Modes
  ******************************************************************************/
 
-PinSet          pins;
 bool            run_modes;
 MarqueeMode     _marquee_mode_instance;
 RandomWalkMode  _random_walk_mode_instance;
@@ -784,7 +763,7 @@ public:
         }
         _mode = _modes[mode_idx];
         //_mode = _modes[3];
-        _mode->init(&pins);
+        _mode->init();
         Serial.print("MODE: ");
         Serial.println(mode_idx, DEC);
     }
@@ -916,18 +895,6 @@ void Prompt(void)
         break;
       case 'D':
         pins.reset();
-        /*
-        pins.led_set_step(130, 26);
-        pins[0].set_step(109, 47);
-        pins[1].set_step(114, 42);
-        pins[2].set_step(96, 60);
-        pins[3].set_step(105, 51);
-        pins[4].set_step(101, 55);
-        pins[5].set_step(101, 55);
-        pins[6].set_step(110, 46);
-        pins[7].set_step(94, 62);
-        pins[8].set_step(134, 22);
-        */
         break;
       case 'x':
         pins[device].disable();
@@ -996,15 +963,20 @@ void loop()
 {
     run_modes = true;
     ModeRunner _mode_runner;
+
     _mode_runner.next_mode();
+    // enable the watchdog timer, 8 seconds
+    wdt_enable(WDTO_8S);
     for(;;)
     {
+        wdt_reset();
         while(run_modes)
         {
 #if PROMPT_ENABLE
             Prompt();
 #endif // PROMPT_ENABLE
             _mode_runner.step();
+            wdt_reset();
         }
 #if PROMPT_ENABLE
         Prompt();
